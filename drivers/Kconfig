@@ -1,0 +1,3 @@
+menu "Drivers"
+rsource "ieee802154/Kconfig.efr32"
+endmenu

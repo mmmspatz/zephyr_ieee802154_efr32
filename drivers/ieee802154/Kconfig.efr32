@@ -1,0 +1,177 @@
+# Copyright (c) 2026 LeafLabs, LLC
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config IEEE802154_EFR32
+	bool "Silicon Labs EFR32 IEEE 802.15.4 driver"
+	default y
+	depends on DT_HAS_SILABS_EFR32_IEEE802154_ENABLED
+	depends on SOC_GECKO_HAS_RADIO
+	depends on IEEE802154
+	select SOC_GECKO_USE_RAIL
+	select SOC_GECKO_CUSTOM_RADIO_PHY
+	select NET_L2_IEEE802154_MGMT if NET_L2_IEEE802154
+	select SILABS_SISDK_PROTOCOL_CRYPTO
+	help
+	  IEEE 802.15.4 radio driver for Silicon Labs EFR32 series SoCs.
+	  Wraps the RAIL (Radio Abstraction Interface Layer) library for
+	  Thread 1.2 operation. Driver always owns TX security and CSL IE
+	  header updates (IEEE802154_HW_TX_SEC).
+
+if IEEE802154_EFR32
+
+config IEEE802154_EFR32_INIT_PRIO
+	int "EFR32 IEEE 802.15.4 initialization priority"
+	default 80
+	help
+	  Initialization priority for the EFR32 IEEE 802.15.4 driver.
+
+config IEEE802154_EFR32_RX_STACK_SIZE
+	int "Driver internal RX thread stack size"
+	default 800
+	help
+	  Stack size for the RX processing thread.
+
+config IEEE802154_EFR32_TX_FIFO_SIZE
+	int "RAIL TX FIFO size in bytes"
+	default 256
+	range 128 2048
+	help
+	  Size of the RAIL TX FIFO buffer. Must be a power of two.
+	  Driver writes PHR (1 byte) + PSDU (up to 127 bytes) = 128 max.
+
+config IEEE802154_EFR32_RX_FIFO_SIZE
+	int "RAIL RX FIFO size in bytes"
+	default 512
+	range 256 4096
+	help
+	  Size of the RAIL RX FIFO buffer. Must be a power of two.
+	  RAIL deposits PHR + PSDU + FCS (up to 130 bytes per frame)
+	  plus internal alignment overhead; 256 holds at most one frame.
+
+config IEEE802154_EFR32_RX_BUF_COUNT
+	int "RX buffer pool entries"
+	default 8
+	range 2 32
+	help
+	  Number of pre-allocated RX buffers. Each holds one max-length
+	  802.15.4 frame. Increase if rx_no_buffer debug counter is nonzero.
+
+config IEEE802154_EFR32_RX_PACKET_QUEUE_SIZE
+	int "RAIL RX packet queue entries"
+	default 8
+	range 2 32
+	help
+	  Number of entries in the RAIL internal packet queue.
+	  Must be >= RX_BUF_COUNT.
+
+config IEEE802154_EFR32_SCHEDULER_TX_PRIO_BASE
+	int "RAIL scheduler TX base priority (fresh TX)"
+	default 100
+	range 0 255
+	help
+	  RAIL multiprotocol scheduler priority for a fresh TX attempt.
+	  Lower = higher priority. Retransmits escalate from this value
+	  toward the floor (PRIO_MAX). Range 0-255.
+
+config IEEE802154_EFR32_SCHEDULER_TX_PRIO_MAX
+	int "RAIL scheduler TX floor priority (after retries)"
+	default 80
+	range 0 255
+	help
+	  Highest priority (lowest numeric value) that TX retransmit
+	  escalation can reach. Must be <= TX_PRIO_BASE.
+
+config IEEE802154_EFR32_SCHEDULER_TX_PRIO_STEP
+	int "RAIL scheduler TX priority step per retry"
+	default 2
+	range 1 50
+	help
+	  How much to decrease (= increase priority) per TX retry.
+
+config IEEE802154_EFR32_SCHEDULER_RX_PRIORITY
+	int "RAIL scheduler background RX priority"
+	default 255
+	range 0 255
+	help
+	  RAIL multiprotocol scheduler priority for background RX.
+	  255 = lowest priority, yields to all other protocols.
+
+config IEEE802154_EFR32_SCHEDULER_TX_SLIP_TIME_US
+	int "RAIL scheduler TX slip time (microseconds)"
+	default 500000
+	range 10000 5000000
+	help
+	  Maximum time RAIL will wait for a multiprotocol TX slot
+	  before aborting the transmission.
+
+config IEEE802154_EFR32_SRC_MATCH_SHORT_MAX
+	int "Maximum number of short address source match entries"
+	default 10
+	help
+	  Maximum number of short addresses in the frame pending source
+	  match table. Used by Thread for sleepy end devices.
+
+config IEEE802154_EFR32_SRC_MATCH_EXT_MAX
+	int "Maximum number of extended address source match entries"
+	default 10
+	help
+	  Maximum number of extended (EUI-64) addresses in the frame
+	  pending source match table.
+
+config OPENTHREAD_RADIO_WORKQUEUE_STACK_SIZE
+	default 1024
+	help
+	  RAIL has deeper internal call chains than Zephyr's 512-byte
+	  default leaves headroom for.  Measured peaks: single-protocol
+	  464, DMP 664.  512 leaves only 48 bytes free even without BLE.
+
+config IEEE802154_EFR32_DEBUG
+	bool "EFR32 IEEE 802.15.4 debug facilities"
+	depends on SHELL
+	help
+	  Adds event counters, RAIL state inspection, and shell commands
+	  for debugging the 802.15.4 driver. Adds ~200 bytes RAM (counter
+	  struct) and ~2-4 KB code.
+
+config IEEE802154_EFR32_XTAL_ACCURACY
+	int "Crystal accuracy in PPM (HFXO, or HFXO+LFXO when SED enabled)"
+	default 40
+	help
+	  Crystal oscillator accuracy in parts per million. Used by
+	  get_sch_acc() for CSL scheduling. 40 PPM is the default for
+	  the EFR32MG24 38.4 MHz HFXO.
+
+	  With IEEE802154_EFR32_SED=y, the value should represent the
+	  HFXO + LFXO ppm sum.  LFXO runs while HFXO is off in EM2, so
+	  its drift accumulates in the CSL phase budget.
+
+config IEEE802154_EFR32_SED
+	bool "Sleepy End Device role marker (EM2 deep-sleep)"
+	depends on SOC_FAMILY_SILABS_S2
+	depends on $(dt_nodelabel_enabled,lfxo)
+	select PM
+	select PM_DEVICE
+	help
+	  Role marker for a build intended to run as a Sleepy End
+	  Device. It carries the LFXO DT precondition (HFXO is off in
+	  EM2, so timer synchronisation needs the LFXO) and pulls in
+	  PM + PM_DEVICE via select. It does NOT gate any driver C
+	  code — the actual PM wiring is keyed on CONFIG_PM (the RAIL
+	  power-manager hookup) and CONFIG_PM_DEVICE (the
+	  efr32_pm_action callback).
+
+	  Reason: RAIL's power manager integration is needed any time
+	  CONFIG_PM=y could cause the SoC to drop to EM2, regardless
+	  of OT role. Tying it to an OT-role Kconfig would leak EM2
+	  in a console-less FTD (HFXO would turn off while RAIL is
+	  still in RX, breaking the radio). The role marker exists to
+	  capture the LFXO invariant, not to control the integration.
+
+	  Boards without LFXO cannot enable this symbol — the DT
+	  dependency fails loud at Kconfig time. Default n. Not
+	  enabling this on a board with LFXO is also fine; just set
+	  CONFIG_PM / CONFIG_PM_DEVICE directly (at your own risk re:
+	  LFXO).
+
+endif # IEEE802154_EFR32

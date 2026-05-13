@@ -1,0 +1,7 @@
+name: zephyr_ieee802154_efr32
+build:
+  kconfig: Kconfig
+  cmake: .
+  settings:
+    board_root: .
+    dts_root: .
