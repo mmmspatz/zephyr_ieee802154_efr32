@@ -91,6 +91,8 @@ static int cmd_counters(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "--- CSL ---");
 	shell_print(sh, "  rx_slot_end:      %u", c->rx_slot_end);
 	shell_print(sh, "  rx_slot_missed:   %u", c->rx_slot_missed);
+	shell_print(sh, "  rx_slot_sched_skip: %u", c->rx_slot_sched_skip);
+	shell_print(sh, "  rx_slot_sched_fail: %u", c->rx_slot_sched_fail);
 	shell_print(sh, "  tx_sched_missed:  %u", c->tx_sched_missed);
 	shell_print(sh, "  csl_phase_upd:    %u", c->csl_phase_updates);
 	shell_print(sh, "  csl_no_period:    %u", c->csl_patch_no_period);

@@ -2952,6 +2952,28 @@ static int efr32_configure(const struct device *dev, enum ieee802154_config_type
 		uint32_t start_us = net_ns_to_us(config->rx_slot.start);
 		uint32_t dur_us = net_ns_to_us(config->rx_slot.duration);
 
+		/*
+		 * If start_us is already in the past relative to RAIL time,
+		 * sl_rail_start_scheduled_rx() will reject with
+		 * SL_STATUS_INVALID_PARAMETER. Skip silently — OT computes the
+		 * next window from anchor + N * period regardless of what
+		 * happens to this one, so dropping a past slot is harmless.
+		 * Matches the upstream nRF5 driver's behavior (see
+		 * modules/zephyr/drivers/ieee802154/ieee802154_nrf5.c
+		 * IEEE802154_CONFIG_RX_SLOT comment).
+		 *
+		 * Signed compare on uint32_t difference handles the RAIL
+		 * timebase wrap (1.19 h period).
+		 */
+		uint32_t now_us = sl_rail_get_time(data->rail_handle);
+
+		if ((int32_t)(start_us - now_us) <= 0) {
+			EFR32_DEBUG_INC(data, rx_slot_sched_skip);
+			LOG_DBG("RX slot start in past (start=%u now=%u); skipping",
+				start_us, now_us);
+			return 0;
+		}
+
 		sl_rail_scheduled_rx_config_t rx_cfg = {
 			.start = start_us,
 			.start_mode = SL_RAIL_TIME_ABSOLUTE,
@@ -2969,7 +2991,9 @@ static int efr32_configure(const struct device *dev, enum ieee802154_config_type
 		sl_rail_status_t rx_st = sl_rail_start_scheduled_rx(
 			data->rail_handle, config->rx_slot.channel, &rx_cfg, &rx_sched);
 		if (rx_st != SL_STATUS_OK) {
-			LOG_ERR("scheduled RX failed: 0x%x", rx_st);
+			EFR32_DEBUG_INC(data, rx_slot_sched_fail);
+			LOG_ERR("scheduled RX failed: 0x%x (start=%u now=%u)",
+				rx_st, start_us, now_us);
 			return -EIO;
 		}
 		return 0;

@@ -111,6 +111,21 @@ struct efr32_debug_counters {
 	uint32_t rx_slot_end;
 	uint32_t rx_slot_missed;
 	uint32_t tx_sched_missed;
+	/*
+	 * IEEE802154_CONFIG_RX_SLOT called with an absolute start time
+	 * already in the past relative to sl_rail_get_time(). The driver
+	 * skips the RAIL call; OT computes the next window from
+	 * anchor + N * period regardless. Non-zero here is informational —
+	 * RAIL would have rejected the call anyway.
+	 */
+	uint32_t rx_slot_sched_skip;
+	/*
+	 * sl_rail_start_scheduled_rx() returned non-OK for reasons other
+	 * than the start-in-past pre-skip (e.g., scheduler busy, channel
+	 * config error). The window is lost but the driver keeps running;
+	 * OT will reschedule the next slot.
+	 */
+	uint32_t rx_slot_sched_fail;
 	uint32_t csl_phase_updates;
 	uint32_t csl_patch_no_period; /* ie_matched but csl_period==0 */
 	uint32_t csl_patch_scan_fail; /* csl_period>0 but patch scan failed */
