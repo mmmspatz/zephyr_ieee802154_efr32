@@ -411,6 +411,24 @@ Key-source size (per `[802154-2024] §9.4.2.3 Table 9-7`): 0 → 0 B, 1 → 4 B,
 to include LFXO ppm: LFXO is the clock that runs while HFXO is off in
 EM2, so its drift accumulates in the CSL phase budget.
 
+### 8.1 `sl_rail_scheduled_rx_config_t` — open differences from SiLabs reference
+
+Two fields in our `sl_rail_scheduled_rx_config_t` differ from the SiLabs
+OpenThread platform abstraction and are worth a controlled experiment:
+
+- `end_mode`: we use `SL_RAIL_TIME_ABSOLUTE` with `end = start + duration`;
+  SiLabs uses `SL_RAIL_TIME_DELAY` with `end = duration`. Both work;
+  DELAY is simpler.
+- `hard_window_end`: we use `1` (abort in-flight reception at window
+  end); SiLabs uses `0` (let an in-progress packet complete). The
+  lenient SiLabs choice is plausibly correct for CSL — the echo reply
+  often lands right at the window edge — but flipping this is a real
+  behavioral change that wants its own commit + data, not a drive-by.
+
+Past-time `start_us` is already handled by the pre-skip in the
+driver (`rx_slot_sched_skip` counter); these two flags are a separate
+question about behavior *inside* a window that was accepted.
+
 ---
 
 ## 9. RAIL initialisation, in one place
