@@ -1698,10 +1698,11 @@ static void efr32_rail_event_cb(sl_rail_handle_t rail_handle, sl_rail_events_t e
 
 		sl_rail_copy_rx_packet(rail_handle, pkt_buf, &pkt_info);
 
+		uint16_t fcf = 0;
 		uint8_t frame_ver = 0;
 
 		if (avail >= PHR_SIZE + 2) {
-			uint16_t fcf = pkt_buf[PHR_SIZE] | ((uint16_t)pkt_buf[PHR_SIZE + 1] << 8);
+			fcf = pkt_buf[PHR_SIZE] | ((uint16_t)pkt_buf[PHR_SIZE + 1] << 8);
 			frame_ver = (fcf & FCF_FRAME_VER_MASK) >> FCF_FRAME_VER_SHIFT;
 #ifdef CONFIG_IEEE802154_EFR32_DEBUG
 			data->debug_counters.last_data_req_fcf = fcf;
@@ -1749,21 +1750,19 @@ static void efr32_rail_event_cb(sl_rail_handle_t rail_handle, sl_rail_events_t e
 			/*
 			 * Check if incoming frame is secured — if so, ACK
 			 * must also be secured (same sec level, matching key).
+			 * frame_ver == FCF_FRAME_VER_2015 implies the earlier
+			 * `avail >= PHR_SIZE + 2` guard passed and fcf was read.
 			 */
 			uint8_t rx_sec_level = 0;
 			uint8_t rx_key_id = 0;
 
-			if (avail >= PHR_SIZE + 2) {
-				uint16_t rx_fcf =
-					pkt_buf[PHR_SIZE] | ((uint16_t)pkt_buf[PHR_SIZE + 1] << 8);
-				if (rx_fcf & FCF_SECURITY_ENABLED) {
-					struct efr32_aux_sec_hdr rx_aux;
+			if (fcf & FCF_SECURITY_ENABLED) {
+				struct efr32_aux_sec_hdr rx_aux;
 
-					if (efr32_parse_aux_sec(&pkt_buf[PHR_SIZE],
-								avail - PHR_SIZE, &rx_aux)) {
-						rx_sec_level = rx_aux.sec_level;
-						rx_key_id = rx_aux.key_id;
-					}
+				if (efr32_parse_aux_sec(&pkt_buf[PHR_SIZE],
+							avail - PHR_SIZE, &rx_aux)) {
+					rx_sec_level = rx_aux.sec_level;
+					rx_key_id = rx_aux.key_id;
 				}
 			}
 			ack_len = efr32_build_enh_ack(pkt_buf, avail, fp_set, ack_buf, rx_sec_level,
@@ -2245,6 +2244,37 @@ static int efr32_tx(const struct device *dev, enum ieee802154_tx_mode mode, stru
 	}
 
 	/*
+	 * Fresh-frame vs. retransmit detection from the MAC sequence number.
+	 *
+	 * The Zephyr radio API doesn't surface OT's mTxInfo.mIsARetx, and the
+	 * OT-on-Zephyr glue (modules/openthread/platform/radio.c) drops it.
+	 * OT's MAC layer keeps the seq# stable across retransmissions of a
+	 * given frame and bumps it for fresh frames (IEEE 802.15.4 7.2.1.4),
+	 * so the same signal can be derived from the PSDU. Frame Version 2
+	 * with SEQ_NUM_SUPPRESS conservatively counts as fresh — OT only
+	 * suppresses seq# on frames (Enh-ACK, certain Enh-Beacons) that this
+	 * path doesn't submit anyway.
+	 */
+	if (frag->len >= 3) { /* 2-byte FCF + 1-byte seq# */
+		uint16_t fcf = frag->data[0] | ((uint16_t)frag->data[1] << 8);
+		uint16_t frame_ver = (fcf & FCF_FRAME_VER_MASK) >> FCF_FRAME_VER_SHIFT;
+		bool seq_suppress =
+			(frame_ver == FCF_FRAME_VER_2015) && (fcf & FCF_SEQ_NUM_SUPPRESS);
+
+		if (seq_suppress || !data->have_last_tx_seq ||
+		    frag->data[2] != data->last_tx_seq) {
+			data->tx_retry_count = 0;
+		} else if (data->tx_retry_count < 255) {
+			data->tx_retry_count++;
+		}
+
+		if (!seq_suppress) {
+			data->last_tx_seq = frag->data[2];
+			data->have_last_tx_seq = true;
+		}
+	}
+
+	/*
 	 * TX security: if frame is not yet secured, encrypt in-place.
 	 * Linearize the PSDU into efr32_tx_buf, encrypt, then write to
 	 * the RAIL FIFO.  tx_buf lives in the driver struct (not on the
@@ -2438,9 +2468,6 @@ static int efr32_tx(const struct device *dev, enum ieee802154_tx_mode mode, stru
 		EFR32_DEBUG_INC(data, tx_start_rejected);
 		data->waiting_for_ack = false;
 		efr32_yield_and_rx(data->rail_handle, data);
-		if (data->tx_retry_count < 255) {
-			data->tx_retry_count++;
-		}
 		return -EIO;
 	}
 
@@ -2448,13 +2475,6 @@ static int efr32_tx(const struct device *dev, enum ieee802154_tx_mode mode, stru
 
 	/* Block until RAIL event callback signals completion */
 	k_sem_take(&data->tx_done, K_FOREVER);
-
-	/* Track retransmits for DMP priority escalation */
-	if (data->tx_result == 0) {
-		data->tx_retry_count = 0;
-	} else if (data->tx_retry_count < 255) {
-		data->tx_retry_count++;
-	}
 
 	return data->tx_result;
 }

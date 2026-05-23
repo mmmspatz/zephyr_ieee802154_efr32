@@ -230,7 +230,15 @@ struct efr32_802154_data {
 	/* TX synchronization */
 	struct k_sem tx_done;
 	int tx_result;          /* errno from TX completion event */
-	uint8_t tx_retry_count; /* consecutive failures, for DMP priority */
+	/*
+	 * Attempt index for the current OT-MAC-level frame (0 = first
+	 * attempt). Drives RAIL scheduler priority escalation in efr32_tx().
+	 * Detected by comparing the submitted frame's MAC sequence number
+	 * to last_tx_seq; same seq# == retransmit, different == fresh frame.
+	 */
+	uint8_t tx_retry_count;
+	uint8_t last_tx_seq;     /* MAC seq# of the last submitted frame */
+	bool have_last_tx_seq;   /* false until first non-suppressed seq# seen */
 	/*
 	 * Set in efr32_tx() when SL_RAIL_TX_OPTION_WAIT_FOR_ACK is requested,
 	 * before submission. Indicates the radio is in a TX-bound transaction

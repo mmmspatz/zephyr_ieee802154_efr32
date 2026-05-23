@@ -120,6 +120,9 @@ static int cmd_reset(const struct shell *sh, size_t argc, char **argv)
 	struct efr32_802154_data *data = get_data();
 
 	memset(&data->debug_counters, 0, sizeof(data->debug_counters));
+	data->tx_retry_count = 0;
+	data->last_tx_seq = 0;
+	data->have_last_tx_seq = false;
 	shell_print(sh, "Counters reset");
 	return 0;
 }
